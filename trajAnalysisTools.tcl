@@ -1,4 +1,4 @@
-package provide trajAnalysisTools 1.0
+package provide trajAnalysisTools 1.0.1
 
 namespace eval ::trajAnalysisTools {
 	variable lst_default_selTexts "{(all and not water)}"
@@ -46,6 +46,18 @@ namespace eval ::trajAnalysisTools {
 #	-	::trajAnalysisTools::calcRMSD { dct_parsedArgs }		\\ <tbl_dataRMSD>
 #	-	::trajAnalysisTools::calcHEATMAP { dct_parsedArgs }		\\ <tbl_dataHEATMAP>
 #	-	::trajAnalysisTools::calcRAMACHANDRAN { dct_parsedArgs }\\ <tbl_dataRAMACHANDRAN>
+#
+##################################
+#	Data flow in this package:
+#---------------------------------
+#	-	function ?args? >> analyse
+#		-	args >> callFunction
+#			-	parseArguments { rawArgs }
+#			-	calcXXXX { dct_parsedArgs }
+#			-	openFile { str_outFile }
+#			-	CSVprint { file_output tbl_data }
+#			-	closeFile { file_outFile }
+#			-	stdoutprint { tbl_data }
 #
 
 ##########################
@@ -249,78 +261,44 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 
 proc ::trajAnalysisTools::callFunction { function { rawArgs } } {
 
-	#	Check function
+	#	Parse the arguments
+	if { [ catch { parseArguments $rawArgs } dct_parsedArgs ] } then {
+		return -code error $dct_parsedArgs
+	} 
+
+	#	Check function, and run the calculations
 	switch -- $function {
 		help { 
 			return -code error
 		}
 		rmsd { 
-			#	Parse the arguments
-			if { [ catch { parseArguments $rawArgs } dct_parsedArgs ] } then {
-				return -code error $dct_parsedArgs
-			} 
 			#	Run the calculation
 			set tbl_data [ calcRMSD $dct_parsedArgs ]
-			#	If an output was specified, print to CSV, else print to stdout
-			if [ dict exists $dct_parsedArgs str_outFile ] {
-				set file_outFile [ openFile [ dict get $dct_parsedArgs str_outFile ] ]
-				CSVprint $file_outFile $tbl_data
-				closeFile $file_outFile
-			} else {
-				stdoutprint $tbl_data
-			}
 		}
 		rmsf { 
-			#	Parse the arguments
-			if { [ catch { parseArguments $rawArgs } dct_parsedArgs ] } then {
-				return -code error $dct_parsedArgs
-			} 
 			#	Run the calculation
 			set tbl_data [ calcRMSF $dct_parsedArgs ]
-			#	If an output was specified, print to CSV, else print to stdout
-			if [ dict exists $dct_parsedArgs str_outFile ] {
-				set file_outFile [ openFile [ dict get $dct_parsedArgs str_outFile ] ]
-				CSVprint $file_outFile $tbl_data
-				closeFile $file_outFile
-			} else {
-				stdoutprint $tbl_data
-			}
 		}
 		heatmap { 
-			#	Parse the arguments
-			if { [ catch { parseArguments $rawArgs } dct_parsedArgs ] } then {
-				return -code error $dct_parsedArgs
-			} 
 			#	Run the calculation
 			set tbl_data [ calcHEATMAP $dct_parsedArgs ]
-			#	If an output was specified, print to CSV, else print to stdout
-			if [ dict exists $dct_parsedArgs str_outFile ] {
-				set file_outFile [ openFile [ dict get $dct_parsedArgs str_outFile ] ]
-				CSVprint $file_outFile $tbl_data
-				closeFile $file_outFile
-			} else {
-				stdoutprint $tbl_data
-			}
 		}
 		ramachandran { 
-			#	Parse the arguments
-			if { [ catch { parseArguments $rawArgs } dct_parsedArgs ] } then {
-				return -code error $dct_parsedArgs
-			} 
 			#	Run the calculation
 			set tbl_data [ calcRAMACHANDRAN $dct_parsedArgs ]
-			#	If an output was specified, print to CSV, else print to stdout
-			if [ dict exists $dct_parsedArgs str_outFile ] {
-				set file_outFile [ openFile [ dict get $dct_parsedArgs str_outFile ] ]
-				CSVprint $file_outFile $tbl_data
-				closeFile $file_outFile
-			} else {
-				stdoutprint $tbl_data
-			}
 		}
 		default { 
 			return -code error "\[trajAnalysisTools\] Error: Unknown function: $function" 
 		}
+	}
+
+	#	If an output was specified, print to CSV, else print to stdout
+	if [ dict exists $dct_parsedArgs str_outFile ] {
+		set file_outFile [ openFile [ dict get $dct_parsedArgs str_outFile ] ]
+		CSVprint $file_outFile $tbl_data
+		closeFile $file_outFile
+	} else {
+		stdoutprint $tbl_data
 	}
 }
 

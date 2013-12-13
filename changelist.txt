@@ -1,0 +1,9 @@
+Changelist
+--------------
+v1.0.1
+	-	Less repeated (cleaner) code
+	-	Added dataflow commentary for code
+
+v1.0
+	-	Initial commit
+	-	Adds RMSD, RMSF, heatmap, and ramachandran functions
