@@ -1,4 +1,4 @@
-package provide trajAnalysisTools 1.1.0
+package provide trajAnalysisTools 1.1.1
 
 namespace eval ::trajAnalysisTools {
 	variable lst_default_selTexts "{(all and not water)}"
@@ -121,20 +121,28 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 		return -code error "\[trajAnalysisTools\] Error: odd number of arguments ($int_nArgs)"
 	}
 
-	#	Split args into pairs, put into temporary array 'arg'
+	#	Split args into pairs, put into dct_parsedArgs
 	foreach { name val } $rawArgs {
 		switch -- $name {
 			-mol { 
-				set arg(molID) $val 
+				dict set dct_parsedArgs int_molID $val
+				# set arg(molID) $val 
 			}
 			-sel { 
-				lappend arg(selText) $val
+				if { [ dict exists $dct_parsedArgs lst_selTexts ] } then {
+					dict set dct_parsedArgs lst_selTexts [ list {*}[ dict get $dct_parsedArgs lst_selTexts ] $val ]
+				} else {
+					dict set dct_parsedArgs lst_selTexts [ list $val ]
+				}
+				# lappend arg(selText) $val
 			}
 			-frames { 
-				set arg(frames) $val 
+				dict set dct_parsedArgs str_frames $val
+				# set arg(frames) $val 
 			}
 			-o { 
-				set arg(o) $val 
+				dict set dct_parsedArgs str_outFile $val
+				#set arg(o) $val 
 			}
 			default { 
 				return -code error "\[trajAnalysisTools\] Error: Unknown argument: $name $val"
@@ -142,35 +150,31 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 		}
 	}
 
-	#	Set defaults if not specified
-	if [ info exists arg(molID) ] {
-		if [ string is integer $arg(molID) ] {
-			dict set dct_parsedArgs int_molID $arg(molID)
-		}
-	} else {
+	#	Set default molecule if not specified, or if the input was 'top'.
+	if { [ expr { 
+		[ expr ! { [ dict exists $dct_parsedArgs int_molID ] } ] || 
+		[ expr { [ dict get $dct_parsedArgs int_molID ] eq "top" } ]
+	} ] } then {
 		dict set dct_parsedArgs int_molID [ molinfo top ]
 	}
 
-	if [ info exists arg(selText) ] {
-		dict set dct_parsedArgs lst_selTexts $arg(selText)
-	} else {
-		dict set dct_parsedArgs lst_selTexts $lst_default_selTexts
-	}
-	
-	#	And check if the molecule specified actually exists
-	if { [ molinfo index [ dict get $dct_parsedArgs int_molID ] ] == -1 } then {
+	#	If selection was a string other than top (already caught), or the molecule doesn't exists, return error.
+	if { [ expr {
+		[ expr ! { [ string is integer [ dict get $dct_parsedArgs int_molID ] ] } ] || 
+		[ expr { [ molinfo index [ dict get $dct_parsedArgs int_molID ] ] == -1 } ] 
+	} ] } then {
 		return -code error "\[trajAnalysisTools\] Error: Molecule specified does not exist, or no molecule loaded."
 	}
 
-	#	If output file was given, pack it in the parsed arguments
-	if [ info exists arg(o) ] {
-		dict set dct_parsedArgs str_outFile $arg(o)
+	#	Set default selection if not specified
+	if { [ expr ! { [ dict exists $dct_parsedArgs lst_selTexts ] } ] } then {
+		dict set dct_parsedArgs lst_selTexts $lst_default_selTexts
 	}
 
-	#	Set frame selections from arg(frames).
+	#	Set frame selections from dct_parsedArgs str_frames.
 	set int_lastFrame [ expr [ molinfo [ dict get $dct_parsedArgs int_molID ] get numframes ] - 1 ]
-	if [ info exists arg(frames) ] {
-		set lst_frameSel [ split $arg(frames) : ]
+	if { [ dict exists $dct_parsedArgs str_frames ] } then {
+		set lst_frameSel [ split [ dict get $dct_parsedArgs str_frames ] : ]
 		switch -- [ llength $lst_frameSel ] {
 			1 { 
 				switch -- $lst_frameSel {
@@ -179,7 +183,7 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 						set int_endFrame $int_lastFrame
 					} 
 					default {
-						return -code error "\[trajAnalysisTools\] Error: bad -frames arg: $arg(frames)"
+						return -code error "\[trajAnalysisTools\] Error: bad -frames arg: [ dict get $dct_parsedArgs str_frames ]"
 					} 
 				}
 			}
@@ -193,7 +197,7 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 				set int_endFrame [ lindex $lst_frameSel 2 ]
 			}
 			default { 
-				return -code error "\[trajAnalysisTools\] Error: bad -frames arg: $arg(frames)" 
+				return -code error "\[trajAnalysisTools\] Error: bad -frames arg: [ dict get $dct_parsedArgs str_frames ]" 
 			}
 		}
 	}
@@ -244,7 +248,7 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 			}
 		} ]
 	} then { 
-		return -code error "\[trajAnalysisTools\] Error: bad -frames arg: $arg(frames)"
+		return -code error "\[trajAnalysisTools\] Error: bad -frames arg: [ dict get $dct_parsedArgs str_frames ]"
 	}
 
 	#	If in debug mode, print all frame values
@@ -260,7 +264,7 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 
 proc ::trajAnalysisTools::callFunction { function { rawArgs } } {
 
-	#	Parse the arguments
+	#	Parse the arguments, pass error back up if necessary.
 	if { [ catch { parseArguments $rawArgs } dct_parsedArgs ] } then {
 		return -code error $dct_parsedArgs
 	} 
@@ -452,6 +456,7 @@ proc ::trajAnalysisTools::calcRMSD { dct_parsedArgs } {
 }
 
 proc ::trajAnalysisTools::calcDIST { dct_parsedArgs } {
+
 	#	Unpack variables from dct_parsedArgs
 	set int_molID [ dict get $dct_parsedArgs int_molID ]
 	set lst_selTexts [ dict get $dct_parsedArgs lst_selTexts ]
@@ -475,7 +480,7 @@ proc ::trajAnalysisTools::calcDIST { dct_parsedArgs } {
 	#	Unpack lst_selTexts into full lists of all selections (current frames, reference frames)
 	set sel_sel1 [ atomselect $int_molID "[ lindex $lst_selTexts 0 ]" ]
 	set sel_sel2 [ atomselect $int_molID "[ lindex $lst_selTexts 1 ]" ]
-	
+
 	#	Progress checks
 	set int_lastProgressPercent 0
 	#	Iterate through each frame
@@ -486,13 +491,13 @@ proc ::trajAnalysisTools::calcDIST { dct_parsedArgs } {
 	#		Append the data list for the current frame to the data table
 	for {set int_curFrame $int_startFrame} {$int_curFrame <= $int_endFrame} {incr int_curFrame $int_stepFrame} {
 		set lst_dataCurFrame [ list $int_curFrame ]
-		set sel_sel1_curFrame $sel_sel1 frame $int_curFrame
-		set sel_sel2_curFrame $sel_sel2 frame $int_curFrame
-		lappend lst_dataCurFrame [ veclength [ vecsub [ getCentreOfMass $sel_sel2_curFrame ] [ getCentreOfMass $sel_sel1_curFrame ] ] ]
+		$sel_sel1 frame $int_curFrame
+		$sel_sel2 frame $int_curFrame
+		lappend lst_dataCurFrame [ veclength [ vecsub [ getCentreOfMass $sel_sel2 ] [ getCentreOfMass $sel_sel1 ] ] ]
 		lappend tbl_dataDIST $lst_dataCurFrame
 		#	Print progress
 		if { [ expr $int_curFrame * 100 / $int_endFrame ] > $int_lastProgressPercent } then {
-			puts "\[Info\] trajAnalysisTools: $int_lastProgressPercent\%: RMSD for frame $int_curFrame/$int_endFrame completed"
+			puts "\[Info\] trajAnalysisTools: $int_lastProgressPercent\%: DIST for frame $int_curFrame/$int_endFrame completed"
 			set int_lastProgressPercent [ expr $int_curFrame * 100 / $int_endFrame ]
 		}
 	}

@@ -1,5 +1,9 @@
 Changelist
 --------------
+v1.1.1
+	-	Bugfixes
+	-	Cleanup of argument parsing code
+
 v1.1.0
 	-	Adds distance function
 	-	Adds centre of mass function
