@@ -1,5 +1,9 @@
 Changelist
 --------------
+v1.1.0
+	-	Adds distance function
+	-	Adds centre of mass function
+
 v1.0.1
 	-	Less repeated (cleaner) code
 	-	Added dataflow commentary for code

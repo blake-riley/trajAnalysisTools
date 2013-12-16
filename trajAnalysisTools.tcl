@@ -1,4 +1,4 @@
-package provide trajAnalysisTools 1.0.1
+package provide trajAnalysisTools 1.1.0
 
 namespace eval ::trajAnalysisTools {
 	variable lst_default_selTexts "{(all and not water)}"
@@ -19,7 +19,7 @@ namespace eval ::trajAnalysisTools {
 #---------------------------------
 #	analyse function ?-arg var?...
 #	<function>: 
-#				rmsd, rmsf, heatmap, ramachandran
+#				rmsd, rmsf, dist, heatmap, ramachandran
 #	<arg>:
 #				-mol <molid> (default: top)
 #				-sel "<selection text>" (default: "(all and not water)" )
@@ -44,8 +44,10 @@ namespace eval ::trajAnalysisTools {
 #	-	::trajAnalysisTools::stdoutprint { tbl_data }			\\ <null>
 #	-	::trajAnalysisTools::calcRMSF { dct_parsedArgs }		\\ <tbl_dataRMSF>
 #	-	::trajAnalysisTools::calcRMSD { dct_parsedArgs }		\\ <tbl_dataRMSD>
+#	-	::trajAnalysisTools::calcDIST { dct_parsedArgs }		\\ <tbl_dataDIST>
 #	-	::trajAnalysisTools::calcHEATMAP { dct_parsedArgs }		\\ <tbl_dataHEATMAP>
 #	-	::trajAnalysisTools::calcRAMACHANDRAN { dct_parsedArgs }\\ <tbl_dataRAMACHANDRAN>
+#	-	::trajAnalysisTools::getCentreOfMass { sel_curSel }		\\ <vec_centreOfMass>
 #
 ##################################
 #	Data flow in this package:
@@ -68,11 +70,6 @@ namespace eval ::trajAnalysisTools {
 	variable flg_debug 0
 }
 
-#X	proc CSVprint { args } { return [ eval CSVprint $args ] }
-#X	proc calcRMSF { args } { return [ eval calcRMSF $args ] }
-#X	proc calcRMSD { args } { return [ eval calcRMSD $args ] }
-#X	proc calcRMSDHeatMap { args } { return [ eval calcHEATMAP $args ] }
-
 ##########################
 #	Main Function
 ##########################
@@ -93,7 +90,7 @@ proc analyse { { function "help" } { args "" } } {
 
 proc ::trajAnalysisTools::helpMSG {} {
 	puts stdout "Usage: analyse function ?-arg var?..."
-	puts stdout "  Functions are: rmsd, rmsf, heatmap, ramachandran"
+	puts stdout "  Functions are: rmsd, rmsf, dist, heatmap, ramachandran"
 	puts stdout "  Args are:"
 	puts stdout "    -mol <molid> (default: top)"
 	puts stdout "    -sel \"<selection text>\" (default: \"(all and not water)\" )"
@@ -153,17 +150,19 @@ proc ::trajAnalysisTools::parseArguments { { rawArgs } } {
 	} else {
 		dict set dct_parsedArgs int_molID [ molinfo top ]
 	}
-	#	And check if the molecule specified actually exists
-	if { [ molinfo index [ dict get $dct_parsedArgs int_molID ] ] == -1 } then {
-		return -code error "\[trajAnalysisTools\] Error: Molecule specified does not exist, or no molecule loaded."
-	}
 
 	if [ info exists arg(selText) ] {
 		dict set dct_parsedArgs lst_selTexts $arg(selText)
 	} else {
 		dict set dct_parsedArgs lst_selTexts $lst_default_selTexts
 	}
+	
+	#	And check if the molecule specified actually exists
+	if { [ molinfo index [ dict get $dct_parsedArgs int_molID ] ] == -1 } then {
+		return -code error "\[trajAnalysisTools\] Error: Molecule specified does not exist, or no molecule loaded."
+	}
 
+	#	If output file was given, pack it in the parsed arguments
 	if [ info exists arg(o) ] {
 		dict set dct_parsedArgs str_outFile $arg(o)
 	}
@@ -272,19 +271,18 @@ proc ::trajAnalysisTools::callFunction { function { rawArgs } } {
 			return -code error
 		}
 		rmsd { 
-			#	Run the calculation
 			set tbl_data [ calcRMSD $dct_parsedArgs ]
 		}
 		rmsf { 
-			#	Run the calculation
 			set tbl_data [ calcRMSF $dct_parsedArgs ]
 		}
+		dist {
+			set tbl_data [ calcDIST $dct_parsedArgs ]
+		}
 		heatmap { 
-			#	Run the calculation
 			set tbl_data [ calcHEATMAP $dct_parsedArgs ]
 		}
 		ramachandran { 
-			#	Run the calculation
 			set tbl_data [ calcRAMACHANDRAN $dct_parsedArgs ]
 		}
 		default { 
@@ -453,6 +451,56 @@ proc ::trajAnalysisTools::calcRMSD { dct_parsedArgs } {
 	return $tbl_dataRMSD
 }
 
+proc ::trajAnalysisTools::calcDIST { dct_parsedArgs } {
+	#	Unpack variables from dct_parsedArgs
+	set int_molID [ dict get $dct_parsedArgs int_molID ]
+	set lst_selTexts [ dict get $dct_parsedArgs lst_selTexts ]
+	set int_startFrame [ dict get $dct_parsedArgs int_startFrame ]
+	set int_stepFrame [ dict get $dct_parsedArgs int_stepFrame ]
+	set int_endFrame [ dict get $dct_parsedArgs int_endFrame ]
+
+	#	Initialise headings list, and tbl_dataRMSD
+	set tbl_dataDIST [ list ]
+	set lst_dataHeadings [ list "frame" ]
+
+	#	Check that number of selections = 2, if not, quit.
+	if { [ llength $lst_selTexts ] != 2 } then {
+		return -code error "\[trajAnalysisTools\] Error: Distance can only be calculated between two selections. Your selection was $lst_selTexts."
+	}
+
+	#	Finish off headings list and append to tbl_dataRMSD
+	lappend lst_dataHeadings "\([ lindex $lst_selTexts 0 ]\) to \([ lindex $lst_selTexts 1 ]\)" 
+	lappend tbl_dataDIST $lst_dataHeadings
+
+	#	Unpack lst_selTexts into full lists of all selections (current frames, reference frames)
+	set sel_sel1 [ atomselect $int_molID "[ lindex $lst_selTexts 0 ]" ]
+	set sel_sel2 [ atomselect $int_molID "[ lindex $lst_selTexts 1 ]" ]
+	
+	#	Progress checks
+	set int_lastProgressPercent 0
+	#	Iterate through each frame
+	#		Initialise the data list for the current frame
+	#		Calculate the centre of mass displacement vectors for each selection
+	#		Calculate the vector distance between each selection (vecsub $v2 $v1)
+	#		Calculate the magnitude of this distance vector (veclength $v)
+	#		Append the data list for the current frame to the data table
+	for {set int_curFrame $int_startFrame} {$int_curFrame <= $int_endFrame} {incr int_curFrame $int_stepFrame} {
+		set lst_dataCurFrame [ list $int_curFrame ]
+		set sel_sel1_curFrame $sel_sel1 frame $int_curFrame
+		set sel_sel2_curFrame $sel_sel2 frame $int_curFrame
+		lappend lst_dataCurFrame [ veclength [ vecsub [ getCentreOfMass $sel_sel2_curFrame ] [ getCentreOfMass $sel_sel1_curFrame ] ] ]
+		lappend tbl_dataDIST $lst_dataCurFrame
+		#	Print progress
+		if { [ expr $int_curFrame * 100 / $int_endFrame ] > $int_lastProgressPercent } then {
+			puts "\[Info\] trajAnalysisTools: $int_lastProgressPercent\%: RMSD for frame $int_curFrame/$int_endFrame completed"
+			set int_lastProgressPercent [ expr $int_curFrame * 100 / $int_endFrame ]
+		}
+	}
+	
+	#	Return the table
+	return $tbl_dataDIST
+}
+
 proc ::trajAnalysisTools::calcHEATMAP { dct_parsedArgs } {
 
 	#	Unpack variables from dct_parsedArgs
@@ -580,4 +628,32 @@ proc ::trajAnalysisTools::calcRAMACHANDRAN { dct_parsedArgs } {
 
 	#	Return the table
 	return $tbl_dataRAMACHANDRAN
+}
+
+proc ::trajAnalysisTools::getCentreOfMass { sel_curSel } {
+	
+	#	Make sure that selection isn't null:
+	if { [ $sel_curSel num ] <= 0 } {
+		return -code error "\[trajAnalysisTools\] Error: Can't calculate centre of mass for an empty selection."
+	}
+
+	#	Create vector, total mass
+	set vec_centreOfMass [ veczero ]
+	set int_totalMass 0
+
+	#	For each atom in the selection:
+	#		Get the coordinates and masses
+	#		Sum the mass-weighted displacement vector
+	foreach vec_coordAtom [ $sel_curSel get { x y z } ] int_massAtom [ $sel_curSel get mass ] {
+		set int_totalMass [ expr $int_totalMass + $int_massAtom ]
+		set vec_centreOfMass [ vecadd $vec_centreOfMass [ vecscale $int_massAtom $vec_coordAtom ] ]
+	}
+
+	#	Finally, divide by the total mass (if non-zero) and return
+	if { $int_totalMass == 0 } then {
+		return -code error "\[trajAnalysisTools\] Error: Can't calculate centre of mass. Selection is massless."
+	} else {
+		return [ vecscale [ expr 1.0 / $int_totalMass ] $vec_centreOfMass ]
+	}
+
 }
